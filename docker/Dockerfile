@@ -12,7 +12,7 @@ RUN curl -sL https://deb.nodesource.com/setup_10.x | bash -
 RUN apt-get install -y nodejs
 
 #Get application code
-RUN git clone https://github.com/timeoff-management/application.git timeoff-management
+RUN git clone https://github.com/andreyyec/application.git timeoff-management
 
 WORKDIR /timeoff-management/
 

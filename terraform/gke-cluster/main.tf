@@ -6,7 +6,7 @@ locals {
   ]
   default_authorized_networks = [
     {
-      cidr_block   = google_compute_subnetwork.subnet.ip_cidr_range
+      cidr_block   = module.networking.subnet_cidr_range
       display_name = "subnet-range"
     },
   ]
@@ -17,31 +17,20 @@ locals {
     services_range_name = "services"
     services_range      = "172.18.32.0/20",
   }
-  startup-script = file("${path.module}/../../scripts/install_application.sh")
 }
 
-resource google_compute_network "vpc" {
-  project                 = var.project_id
-  name                    = var.name
-  auto_create_subnetworks = false
-}
-
-resource google_compute_subnetwork "subnet" {
+provider "google" {
   project = var.project_id
-  name    = var.name
-  network = google_compute_network.vpc.self_link
   region  = var.region
+}
 
-  ip_cidr_range = "10.2.0.0/16"
-
-  secondary_ip_range {
-    range_name    = local.subnet.cluster_range_name
-    ip_cidr_range = local.subnet.cluster_range
-  }
-  secondary_ip_range {
-    range_name    = local.subnet.services_range_name
-    ip_cidr_range = local.subnet.services_range
-  }
+module "networking" {
+  source = "../modules/network"
+  project_id = var.project_id
+  region = var.region
+  name = var.name
+  subnets = local.subnet
+  allow_incoming_traffic_sources = ["0.0.0.0/0"]
 }
 
 resource "google_compute_address" "cluster_external_address" {
@@ -55,8 +44,8 @@ resource "google_container_cluster" "primary" {
   name       = var.name
   project    = var.project_id
   location   = var.region
-  network    = google_compute_network.vpc.self_link
-  subnetwork = google_compute_subnetwork.subnet.self_link
+  network    = module.networking.vpc_self_link
+  subnetwork = module.networking.vpc_subnet_self_link
 
   node_locations = local.zones
 
@@ -68,8 +57,8 @@ resource "google_container_cluster" "primary" {
   }
 
   ip_allocation_policy {
-    cluster_secondary_range_name  = google_compute_subnetwork.subnet.secondary_ip_range[0].range_name
-    services_secondary_range_name = google_compute_subnetwork.subnet.secondary_ip_range[1].range_name
+    cluster_secondary_range_name  = module.networking.cluster_subnet_range
+    services_secondary_range_name = module.networking.services_subnet_range
   }
 
   master_authorized_networks_config {
@@ -97,27 +86,6 @@ resource "google_container_cluster" "primary" {
       issue_client_certificate = true
     }
   }
-}
-
-resource "google_compute_router" "router" {
-  project = var.project_id
-  name    = var.name
-  region  = google_compute_subnetwork.subnet.region
-  network = google_compute_network.vpc.self_link
-
-  bgp {
-    asn = 64514
-  }
-}
-
-resource "google_compute_router_nat" "nat" {
-  project = var.project_id
-  name    = var.name
-
-  router                             = google_compute_router.router.name
-  region                             = google_compute_router.router.region
-  nat_ip_allocate_option             = "AUTO_ONLY"
-  source_subnetwork_ip_ranges_to_nat = "ALL_SUBNETWORKS_ALL_IP_RANGES"
 }
 
 provider "kubernetes" {
@@ -181,57 +149,8 @@ resource "kubernetes_service" "app_lb" {
 
     port {
       name        = "external-api"
-      port        = 3000
+      port        = 80
       target_port = 3000
     }
   }
-}
-
-//resource "kubernetes_ingress" "ingress_timeoff" {
-//  metadata {
-//    name = "timeoff-ingress"
-////    annotations = {
-////      "kubernetes.io/ingress.class"             = "citrix-ingress"
-////      "ingress.citrix.com/insecure-termination" = "allow"
-////    }
-//  }
-//  spec {
-////    tls {
-////      secret_name = "cert-key"
-////    }
-//    rule {
-//      host = "www.acastrocr.com"
-//      http {
-//        path {
-//          path = "/"
-//          backend {
-//            service_name = "grl-lb-service"
-//            service_port = 3000
-//          }
-//        }
-//      }
-//    }
-//  }
-//}
-
-module "instance" {
-  source       = "../modules/gcp/vm_instance"
-  project      = var.project_id
-  name         = "${var.name}-instance-default"
-  network      = google_compute_network.vpc.self_link
-  subnet       = google_compute_subnetwork.subnet.self_link
-  enable_external_ip = true
-
-  tags = [
-    "dev"
-  ]
-
-  scopes = [
-    "monitoring-write",
-    "logging-write",
-    "compute-rw"
-  ]
-
-  zone                    = "${var.region}-a"
-  metadata_startup_script = local.startup-script
 }

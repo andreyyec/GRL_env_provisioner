@@ -8,7 +8,6 @@ variable "name" {
 
 variable "region" {
   type = string
-  default = "us-west1"
 }
 
 variable "cluster_user" {
